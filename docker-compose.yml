@@ -1,0 +1,73 @@
+services:
+  postgres:
+    image: postgres:14
+    container_name: chu_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./data/source/postgres:/dumps:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: chu_namenode
+    environment:
+      - CLUSTER_NAME=chu-cluster
+    env_file:
+      - ./hadoop.env
+    ports:
+      - "${HDFS_NAMENODE_PORT}:9870"
+      - "9000:9000"
+    volumes:
+      - namenode_data:/hadoop/dfs/name
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9870"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: chu_datanode
+    environment:
+      - SERVICE_PRECONDITION=namenode:9870
+    env_file:
+      - ./hadoop.env
+    volumes:
+      - datanode_data:/hadoop/dfs/data
+    depends_on:
+      - namenode
+
+  spark:
+    image: apache/spark:3.5.3
+    container_name: chu_spark
+    command: ["/opt/spark/sbin/start-master.sh"]
+    environment:
+      - SPARK_NO_DAEMONIZE=true
+    env_file:
+      - ./hadoop.env
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    volumes:
+      - ./jobs:/opt/jobs
+      - ./data:/opt/data:ro
+    depends_on:
+      - namenode
+      - datanode
+
+
+
+volumes:
+  postgres_data:
+  namenode_data:
+  datanode_data:
