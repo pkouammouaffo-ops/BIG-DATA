@@ -1,0 +1,73 @@
+# ========================================
+# GITIGNORE - Infrastructure Docker CHU
+# ========================================
+
+# Variables d'environnement (contient mots de passe)
+.env
+.env.local
+.env.*.local
+
+# Données PostgreSQL
+postgres/data/*
+!postgres/data/.gitkeep
+
+# Logs Airflow
+airflow/logs/*
+!airflow/logs/.gitkeep
+
+# Données NiFi
+nifi/data/*
+!nifi/data/.gitkeep
+
+# Volumes Docker (si montés localement)
+hadoop/namenode/*
+hadoop/datanode1/*
+hadoop/datanode2/*
+hadoop/datanode3/*
+spark/master/*
+spark/worker1/*
+spark/worker2/*
+
+# Fichiers temporaires
+*.tmp
+*.log
+*.pid
+*.swp
+*~
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Backup
+*.bak
+*.backup
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Scripts utilitaires temporaires (connexion Hive locale)
+run_hive_ddl.py
+
+# Fichiers de données brutes (trop volumineux)
+"DATA 2024/"
+DATA*/
+*.csv
+*.dump
+*.sql
+
+# Jars
+*.jar
+
+# Keepfiles (garder les dossiers vides)
+!**/.gitkeep

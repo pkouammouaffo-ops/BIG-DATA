@@ -1,0 +1,315 @@
+version: '3.8'
+
+# ========================================
+# PROJET CHU - INFRASTRUCTURE BIG DATA
+# Architecture Médaillon (Bronze-Silver-Gold)
+# 11 conteneurs : HDFS + Spark + NiFi + Airflow + PostgreSQL + Hive
+# ========================================
+
+networks:
+  chu_network:
+    driver: bridge
+    name: chu_network
+
+volumes:
+  chu_namenode_data:
+  chu_datanode1_data:
+  chu_datanode2_data:
+  chu_datanode3_data:
+  chu_postgres_data:
+  chu_airflow_logs:
+  chu_nifi_data:
+
+services:
+  # ========================================
+  # COUCHE STOCKAGE : HDFS (1 NameNode + 3 DataNodes)
+  # ========================================
+  
+  chu-namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: chu-namenode
+    hostname: chu-namenode
+    environment:
+      - CLUSTER_NAME=chu_cluster
+      - CORE_CONF_fs_defaultFS=hdfs://chu-namenode:9000
+      - CORE_CONF_hadoop_http_staticuser_user=root
+      - HDFS_CONF_dfs_replication=3
+      - HDFS_CONF_dfs_namenode_name_dir=/hadoop/dfs/name
+      - HDFS_CONF_dfs_permissions_enabled=false
+    ports:
+      - "9870:9870"  # NameNode Web UI
+      - "9000:9000"  # HDFS RPC
+    volumes:
+      - chu_namenode_data:/hadoop/dfs/name
+    networks:
+      - chu_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9870"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  chu-datanode1:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: chu-datanode1
+    hostname: chu-datanode1
+    environment:
+      - CORE_CONF_fs_defaultFS=hdfs://chu-namenode:9000
+      - HDFS_CONF_dfs_datanode_data_dir=/hadoop/dfs/data
+      - HDFS_CONF_dfs_permissions_enabled=false
+    ports:
+      - "9864:9864"  # DataNode1 Web UI
+    volumes:
+      - chu_datanode1_data:/hadoop/dfs/data
+    networks:
+      - chu_network
+    depends_on:
+      - chu-namenode
+    restart: unless-stopped
+
+  chu-datanode2:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: chu-datanode2
+    hostname: chu-datanode2
+    environment:
+      - CORE_CONF_fs_defaultFS=hdfs://chu-namenode:9000
+      - HDFS_CONF_dfs_datanode_data_dir=/hadoop/dfs/data
+      - HDFS_CONF_dfs_permissions_enabled=false
+    ports:
+      - "9865:9864"  # DataNode2 Web UI
+    volumes:
+      - chu_datanode2_data:/hadoop/dfs/data
+    networks:
+      - chu_network
+    depends_on:
+      - chu-namenode
+    restart: unless-stopped
+
+  chu-datanode3:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: chu-datanode3
+    hostname: chu-datanode3
+    environment:
+      - CORE_CONF_fs_defaultFS=hdfs://chu-namenode:9000
+      - HDFS_CONF_dfs_datanode_data_dir=/hadoop/dfs/data
+      - HDFS_CONF_dfs_permissions_enabled=false
+    ports:
+      - "9866:9864"  # DataNode3 Web UI
+    volumes:
+      - chu_datanode3_data:/hadoop/dfs/data
+    networks:
+      - chu_network
+    depends_on:
+      - chu-namenode
+    restart: unless-stopped
+
+  # ========================================
+  # COUCHE TRAITEMENT : SPARK (1 Master + 2 Workers)
+  # ========================================
+
+  chu-spark-master:
+    image: apache/spark:3.5.0
+    container_name: chu-spark-master
+    hostname: chu-spark-master
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+    environment:
+      - SPARK_MODE=master
+      - SPARK_MASTER_HOST=chu-spark-master
+      - SPARK_MASTER_PORT=7077
+      - SPARK_MASTER_WEBUI_PORT=8080
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+    ports:
+      - "8888:8080"  # Spark Master Web UI (changé pour éviter conflit)
+      - "7077:7077"  # Spark Master RPC
+    networks:
+      - chu_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  chu-spark-worker1:
+    image: apache/spark:3.5.0
+    container_name: chu-spark-worker1
+    hostname: chu-spark-worker1
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://chu-spark-master:7077
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://chu-spark-master:7077
+      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_MEMORY=2g
+      - SPARK_WORKER_WEBUI_PORT=8081
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+    ports:
+      - "8081:8081"  # Worker1 Web UI
+    networks:
+      - chu_network
+    depends_on:
+      - chu-spark-master
+    restart: unless-stopped
+
+  chu-spark-worker2:
+    image: apache/spark:3.5.0
+    container_name: chu-spark-worker2
+    hostname: chu-spark-worker2
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://chu-spark-master:7077
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://chu-spark-master:7077
+      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_MEMORY=2g
+      - SPARK_WORKER_WEBUI_PORT=8082
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+    ports:
+      - "8082:8082"  # Worker2 Web UI
+    networks:
+      - chu_network
+    depends_on:
+      - chu-spark-master
+    restart: unless-stopped
+
+  # ========================================
+  # BASE DE DONNÉES : PostgreSQL (SIH + Hive Metastore)
+  # ========================================
+
+  chu-postgres:
+    image: postgres:15
+    container_name: chu-postgres
+    hostname: chu-postgres
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=chu_postgres_2026
+      - POSTGRES_DB=sih_data
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8
+    ports:
+      - "5433:5432"  # Port 5433 pour éviter conflit avec Solvy
+    volumes:
+      - chu_postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d
+    networks:
+      - chu_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ========================================
+  # CATALOGUE : Apache Hive Metastore + HiveServer2
+  # ========================================
+
+  chu-hive-server:
+    build:
+      context: ./hive
+      dockerfile: Dockerfile
+    image: chu-hive-custom:4.0.0
+    container_name: chu-hive-server
+    hostname: chu-hive-server
+    environment:
+      - SERVICE_NAME=hiveserver2
+      - DB_DRIVER=postgres
+      - SERVICE_OPTS=-Djavax.jdo.option.ConnectionDriverName=org.postgresql.Driver -Djavax.jdo.option.ConnectionURL=jdbc:postgresql://chu-postgres:5432/metastore_db -Djavax.jdo.option.ConnectionUserName=postgres -Djavax.jdo.option.ConnectionPassword=chu_postgres_2026
+      - HIVE_SITE_CONF_fs_defaultFS=hdfs://chu-namenode:9000
+    ports:
+      - "10000:10000"  # HiveServer2 (Beeline)
+      - "10002:10002"  # HiveServer2 Web UI
+    networks:
+      - chu_network
+    depends_on:
+      - chu-postgres
+      - chu-namenode
+    restart: unless-stopped
+
+  # ========================================
+  # INGESTION : Apache NiFi
+  # ========================================
+
+  chu-nifi:
+    image: apache/nifi:1.23.2
+    container_name: chu-nifi
+    hostname: chu-nifi
+    environment:
+      - NIFI_WEB_HTTP_PORT=9090
+      - SINGLE_USER_CREDENTIALS_USERNAME=admin
+      - SINGLE_USER_CREDENTIALS_PASSWORD=chu_nifi_admin_2026
+    ports:
+      - "9090:9090"  # NiFi Web UI
+    volumes:
+      - chu_nifi_data:/opt/nifi/nifi-current/conf
+      - ./nifi/data:/opt/nifi/data
+    networks:
+      - chu_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/nifi"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ========================================
+  # ORCHESTRATION : Apache Airflow
+  # ========================================
+
+  chu-airflow:
+    image: apache/airflow:2.9.1-python3.11
+    container_name: chu-airflow
+    hostname: chu-airflow
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://postgres:chu_postgres_2026@chu-postgres:5432/airflow_db
+      - AIRFLOW__CORE__FERNET_KEY=ZmDfcTF7_60GrrY167zsiPd67pEvs0aGOv2oasOM1Pg=
+      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=True
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=True
+      - AIRFLOW__WEBSERVER__WORKERS=1
+      - AIRFLOW__WEBSERVER__WORKER_TIMEOUT=300
+      - AIRFLOW_CONN_POSTGRES_SIH=postgresql://postgres:chu_postgres_2026@chu-postgres:5432/sih_data
+      - AIRFLOW_CONN_SPARK_CHU=spark://chu-spark-master:7077
+      - _AIRFLOW_DB_MIGRATE=true
+      - _AIRFLOW_WWW_USER_CREATE=true
+      - _AIRFLOW_WWW_USER_USERNAME=admin
+      - _AIRFLOW_WWW_USER_PASSWORD=chu_airflow_2026
+    ports:
+      - "8085:8080"  # Airflow Web UI (port 8085 pour éviter conflit)
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - chu_airflow_logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - chu_network
+    command: standalone
+    depends_on:
+      - chu-postgres
+      - chu-spark-master
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+# ========================================
+# RÉCAPITULATIF DES PORTS EXPOSÉS (évite conflits avec Solvy)
+# ========================================
+# - 9870  : HDFS NameNode Web UI
+# - 9864-9866 : HDFS DataNodes Web UI
+# - 8888  : Spark Master Web UI
+# - 8081-8082 : Spark Workers Web UI
+# - 7077  : Spark Master RPC
+# - 5433  : PostgreSQL (au lieu de 5432)
+# - 10000 : HiveServer2 (Beeline)
+# - 10002 : HiveServer2 Web UI
+# - 9090  : NiFi Web UI
+# - 8085  : Airflow Web UI (au lieu de 8080)
