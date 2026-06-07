@@ -261,7 +261,10 @@ services:
   # ========================================
 
   chu-airflow:
-    image: apache/airflow:2.9.1-python3.11
+    build:
+      context: ./airflow
+      dockerfile: Dockerfile
+    image: chu-airflow-custom:2.9.1
     container_name: chu-airflow
     hostname: chu-airflow
     environment:
@@ -290,8 +293,10 @@ services:
       - chu_network
     command: standalone
     depends_on:
-      - chu-postgres
-      - chu-spark-master
+      chu-postgres:
+        condition: service_healthy
+      chu-spark-master:
+        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
