@@ -297,6 +297,11 @@ def build_dim_diagnostic(spark: SparkSession, extraction_date: str) -> dict:
 
     df = spark.read.parquet(path_in)
 
+    # Renommage colonnes Silver → Gold
+    df = df \
+        .withColumnRenamed("code_diag", "code_cim10") \
+        .withColumnRenamed("diagnostic", "libelle_diagnostic")
+
     # Extraction du chapitre CIM-10 (première lettre du code)
     df_gold = df \
         .withColumn("sk_diagnostic", F.monotonically_increasing_id() + 1) \
@@ -349,7 +354,7 @@ def build_dim_professionnel(spark: SparkSession, extraction_date: str) -> dict:
     """
     log.info("  [5/7] Construction dim_professionnel (SCD Type 2)...")
 
-    path_in  = f"{SILVER_BASE}/professionnel_sante_rgpd"
+    path_in  = f"{SILVER_BASE}/professionnel_sante_dedup"
     path_out = f"{GOLD_DIMS}/dim_professionnel"
 
     df = spark.read.parquet(path_in)
@@ -358,13 +363,13 @@ def build_dim_professionnel(spark: SparkSession, extraction_date: str) -> dict:
         .withColumn("sk_professionnel", F.monotonically_increasing_id() + 1) \
         .select(
             "sk_professionnel",
-            "id_professionnel_hash",
-            F.coalesce(F.col("specialite"), F.lit("NON RENSEIGNÉE")).alias("specialite"),
-            F.coalesce(F.col("mode_exercice"), F.lit("INCONNU")).alias("mode_exercice"),
-            F.coalesce(F.col("categorie_pro"), F.lit("NON RENSEIGNÉE")).alias("categorie_pro"),
-            F.col("est_courant"),
-            F.col("date_debut_validite"),
-            F.col("date_fin_validite"),
+            F.coalesce(F.col("identifiant_rpps"), F.col("identifiant")).alias("id_professionnel_hash"),
+            F.coalesce(F.col("code_specialite"), F.lit("NON RENSEIGNÉE")).alias("specialite"),
+            F.coalesce(F.col("categorie_normalisee"), F.lit("INCONNU")).alias("mode_exercice"),
+            F.coalesce(F.col("categorie_professionnelle"), F.lit("NON RENSEIGNÉE")).alias("categorie_pro"),
+            F.lit(True).alias("est_courant"),
+            F.current_date().alias("date_debut_validite"),
+            F.lit(None).cast("date").alias("date_fin_validite"),
         )
 
     df_gold.write.mode("overwrite").option("compression", "snappy").parquet(path_out)

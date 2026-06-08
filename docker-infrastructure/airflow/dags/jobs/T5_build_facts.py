@@ -104,12 +104,19 @@ def build_fait_consultation(spark: SparkSession,
     """
     log.info("  [1/4] Construction fait_consultation...")
 
-    path_in  = f"{SILVER_BASE}/consultation_rgpd"
+    path_in  = f"{SILVER_BASE}/consultation_dedup"
     path_out = f"{GOLD_FAITS}/fait_consultation"
 
     df = spark.read.parquet(path_in)
     before = df.count()
-    log.info(f"    Silver consultation_rgpd : {before:,} lignes")
+    log.info(f"    Silver consultation_dedup : {before:,} lignes")
+
+    # ── Adaptation colonnes Silver → noms attendus ────────────────────────
+    df = df \
+        .withColumnRenamed("id_patient",    "id_patient_hash") \
+        .withColumnRenamed("id_prof_sante", "id_professionnel_hash") \
+        .withColumnRenamed("code_diag",     "code_cim10") \
+        .withColumnRenamed("duree_minutes", "duree_consultation")
 
     # ── Jointure dim_temps ────────────────────────────────────────────────
     df = resolve_date_key(df, "date_consultation", dims["dim_temps"], "sk_temps")
@@ -150,8 +157,8 @@ def build_fait_consultation(spark: SparkSession,
         F.col("sk_professionnel"),
         F.col("sk_diagnostic"),
         F.coalesce(F.col("duree_consultation"), F.lit(0)).alias("duree_minutes"),
-        F.coalesce(F.col("cout_consultation"), F.lit(0.0)).cast("float").alias("cout_euros"),
-        F.col("type_consultation"),
+        F.lit(0.0).cast("float").alias("cout_euros"),
+        F.coalesce(F.col("motif"), F.lit("NON RENSEIGNÉ")).alias("type_consultation"),
         F.col("annee"),
         F.col("mois"),
     )
@@ -343,8 +350,18 @@ def build_fait_satisfaction(spark: SparkSession,
         log.info(f"    Colonnes ESATIS : {df.columns[:10]}...")
     except Exception:
         log.warning("    ⚠️  CSV satisfaction non trouvé → table vide")
-        df_gold = spark.createDataFrame([], schema=None)
-        df_gold.write.mode("overwrite").parquet(path_out)
+        from pyspark.sql.types import StructType, StructField, FloatType, IntegerType
+        schema_empty = StructType([
+            StructField("sk_satisfaction",  LongType(),    False),
+            StructField("sk_etablissement", LongType(),    True),
+            StructField("sk_question",      LongType(),    True),
+            StructField("sk_temps",         LongType(),    True),
+            StructField("note_moyenne",     FloatType(),   True),
+            StructField("nb_repondants",    IntegerType(), True),
+            StructField("taux_reponse",     FloatType(),   True),
+        ])
+        df_gold = spark.createDataFrame([], schema=schema_empty)
+        df_gold.write.mode("overwrite").option("compression", "snappy").parquet(path_out)
         return {"fait": "fait_satisfaction", "count": 0, "status": "OK"}
 
     # Mapping des colonnes ESATIS vers le modèle Gold
